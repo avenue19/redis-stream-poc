@@ -1,5 +1,7 @@
 ﻿using StackExchange.Redis;
+using stream_shared.Extensions;
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace stream_sub
@@ -13,35 +15,64 @@ namespace stream_sub
 
         static async Task Main(string[] args)
         {
-            // TODO: use a fixed set of consumer IDs or delete consumers after each run
             var consumerId = Guid.NewGuid().ToString();
             Console.WriteLine($"Consumer {consumerId} starting...");
             var db = redis.GetDatabase();
 
-            Random rand = new();
-
             while (true)
             {
                 var msgs = await db.StreamReadGroupAsync(StreamId, ConsumerGroup, consumerId, ">", count: 1);
+
                 if (msgs.Length > 0)
                 {
-                    Console.WriteLine($"Received message {msgs[0].Values[0]}");
-                    await Task.Delay(3000);
-                    if (rand.Next(0, 10) > 2)
-                    {
-                        Console.WriteLine($"Processed message {msgs[0].Values[0]}");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Failed to process message {msgs[0].Values[0]}");
-                        // TODO: retry the event
-                    }
+                    var msg = msgs[0];
+                    Console.Write($"Received message {msg.Id} with value {msg.Values[0]}...");
+                    await ProcessMessage(db, msg);
                 }
                 else
                 {
                     Console.WriteLine("No new messages");
+
+                    // Get pending messages for all consumers
+                    var pendingMessages = await db.StreamPendingMessagesAsync(StreamId, ConsumerGroup, count: 1, RedisValue.Null);
+
+                    if (pendingMessages.Length > 0)
+                    {
+                        // Claim the first pending message that appears to have failed due to age
+                        var retryMessages = await db.StreamClaimAsync(StreamId,
+                            ConsumerGroup,
+                            consumerId,
+                            minIdleTimeInMs: 1000 * 10,
+                            messageIds: pendingMessages.Select(pm => pm.MessageId).ToArray());
+
+                        if (retryMessages.Length > 0)
+                        {
+                            var msg = retryMessages[0];
+                            ConsoleColor.Blue.Write($"Retrying message {msg.Id} with value {msg.Values[0]}...");
+                            await ProcessMessage(db, msg);
+                        }
+                    }
+
                     await Task.Delay(3000);
                 }
+            }
+        }
+
+        private static async Task ProcessMessage(IDatabase db, StreamEntry msg)
+        {
+            // Simulate occasional consumer failures
+            Random rand = new();
+            await Task.Delay(3000);
+            if (rand.Next(0, 10) > 3)
+            {
+                ConsoleColor.Green.WriteLine("Processed message");
+
+                // Acknowledge the message, removing it from pending
+                await db.StreamAcknowledgeAsync(StreamId, ConsumerGroup, msg.Id);
+            }
+            else
+            {
+                ConsoleColor.Red.WriteLine("Failed!");
             }
         }
     }

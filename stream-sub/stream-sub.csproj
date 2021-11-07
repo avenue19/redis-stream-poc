@@ -10,4 +10,8 @@
     <PackageReference Include="StackExchange.Redis" Version="2.2.79" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\stream-shared\stream-shared.csproj" />
+  </ItemGroup>
+
 </Project>
