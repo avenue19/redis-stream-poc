@@ -1,5 +1,6 @@
 ﻿using StackExchange.Redis;
 using System;
+using System.Threading.Tasks;
 
 namespace stream_pub
 {
@@ -10,23 +11,22 @@ namespace stream_pub
         private const string StreamId = "events_stream";
         private const string ConsumerGroup = "events_consumer_group";
 
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             var db = redis.GetDatabase();
-            try
+            if (! await db.KeyExistsAsync(StreamId))
             {
-                db.StreamCreateConsumerGroup(StreamId, ConsumerGroup, "$");
-            }
-            catch (Exception)
-            {
-                Console.WriteLine($"{ConsumerGroup} already exists");
+                if (! await db.StreamCreateConsumerGroupAsync(StreamId, ConsumerGroup, "$"))
+                {
+                    throw new ApplicationException("Could not create consumer group");
+                }
             }
 
             while (true)
             {
                 for (int i=0; i<10; i++)
                 {
-                    var messageId = db.StreamAdd(StreamId, "message", i.ToString());
+                    var messageId = await db.StreamAddAsync(StreamId, "message", i.ToString());
                     Console.WriteLine($"Added stream event {messageId}");
                 }
                 Console.WriteLine("10 events added");
